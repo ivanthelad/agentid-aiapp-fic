@@ -1,0 +1,71 @@
+# ===== Environment & Secrets =====
+# All .env files except the template
+.env
+.env.*
+!.env.template
+
+# ===== macOS =====
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+._*
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+.AppleDB
+.AppleDesktop
+Network Trash Folder
+Temporary Items
+.apdisk
+
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+*.egg
+dist/
+build/
+.eggs/
+*.whl
+.Python
+env/
+venv/
+.venv/
+pip-log.txt
+pip-delete-this-directory.txt
+
+# ===== Azure =====
+.azure/
+.azure-*/
+
+# ===== IDEs =====
+.vscode/
+!.vscode/settings.json
+!.vscode/extensions.json
+.idea/
+*.swp
+*.swo
+*~
+.project
+.classpath
+.settings/
+
+# ===== Docker =====
+*.log
+
+# ===== Copilot session state =====
+.copilot/
+
+# ===== Misc =====
+*.tmp
+*.bak
+*.orig
+.cache/
+node_modules/
