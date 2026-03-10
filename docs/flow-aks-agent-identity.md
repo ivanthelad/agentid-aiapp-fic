@@ -1,35 +1,20 @@
 # End-to-End Flow: Agent Identity on AKS (Workload Identity + Sidecar)
 
-Below is a grounded, implementation-oriented explanation of Microsoft Entra Agent ID on Kubernetes, tailored to this scenario:
-
-An AI agent running on AKS using Workload Identity Federation, with the goal of assigning it an Agent Identity via an Agent Identity Blueprint, and enabling it to access downstream Azure resources.
-
-This document mirrors the Functions flow described in `guidance.exta.md` but covers the AKS-specific mechanics: OIDC-based federation, the Entra SDK sidecar, and Kubernetes service account binding.
+Implementation guide for Entra Agent ID on AKS using workload identity federation and the Entra SDK sidecar.
 
 ---
 
 ## 1. What "Agent Identity" is
 
-Microsoft Entra Agent ID introduces a first-class identity for AI agents, distinct from:
-
-- the hosting application (AKS pod, Container App, etc.)
-- the user (if any)
-- the infrastructure identity (Kubernetes service account)
-
 An Agent Identity is:
 
-- Represented as its own service principal in Microsoft Entra ID (`servicePrincipalType: ServiceIdentity`)
-- Created from an Agent Identity Blueprint
-- Used to acquire tokens (app-only or on-behalf-of-user)
-- Auditable as "the agent did this," not just "the pod did this"
+- A first-class service principal in Entra ID (`servicePrincipalType: ServiceIdentity`) created from an Agent Identity Blueprint
+- Auditable as "the agent did this" -- tokens carry agent-specific `oid`, not the pod or infrastructure identity
 
-The Microsoft Entra SDK for Agent ID (sidecar) handles:
+The Entra SDK sidecar handles:
 
-- Token acquisition from the K8s service account JWT
-- Federated identity credential (FIC) exchange
-- Agent identity token acquisition via `fmi_path`
-- Downstream API calls with cached tokens
-- Abstracting all identity logic away from your app code
+- Token acquisition from K8s service account JWT through FIC exchange and `fmi_path`-based agent identity resolution
+- Downstream API calls with cached tokens, abstracting all identity logic away from app code
 
 ---
 
@@ -37,14 +22,10 @@ The Microsoft Entra SDK for Agent ID (sidecar) handles:
 
 ### 2.1 Agent Identity Blueprint (design-time construct)
 
-Blueprint = template + authority.
-
 - Every Agent Identity must be created from a blueprint
 - Blueprints define the identity class and hold the FIC (trust link)
 - Created using Microsoft Graph (`/beta/applications/`)
 - Sponsors are **mandatory** -- the API rejects requests without them
-
-Think of it as: *"This is what agents of type X are allowed to be."*
 
 **AKS-specific:** The FIC on the blueprint points to the AKS cluster's OIDC issuer URL and a specific Kubernetes service account subject.
 
@@ -67,8 +48,6 @@ Your AKS pod:
 - The app makes simple HTTP calls to the sidecar at `localhost:5000`
 - The sidecar uses the K8s service account JWT (injected by workload identity webhook) to authenticate
 
-**This separation is intentional.**
-
 ### 2.4 The Three-Layer Mental Model
 
 ```
@@ -82,8 +61,6 @@ Your AKS pod is replaceable; the agent identity is not.
 ---
 
 ## 3. End-to-end flow (AKS + Workload Identity + Sidecar)
-
-Below is the correct order and interaction model, derived from the official docs, the Microsoft Entra SDK for AgentID documentation, and validated through live implementation.
 
 ### Step 1 -- Create an Agent Identity Blueprint (one-time)
 
@@ -162,8 +139,6 @@ OData-Version: 4.0
 **Outcome:**
 - Agent identity service principal created
 - Record the agent identity's `appId` (this is the `AGENT_IDENTITY_ID`)
-
-This step is often triggered when a new AI agent is deployed or when a new tenant is onboarded.
 
 ### Step 4 -- Assign permissions to the Agent Identity
 
@@ -304,8 +279,7 @@ At runtime, when your app needs to call a downstream API as the agent:
 
 7. **Downstream service sees agent identity** -- the token's `oid` is the agent identity, not the blueprint or pod identity
 
-**Key point:**
-✅ The agent identity is the security principal, not the AKS pod.
+**Key point:** The agent identity is the security principal, not the AKS pod.
 
 ---
 
@@ -333,6 +307,8 @@ sequenceDiagram
 
 ## 5. Organizational responsibilities
 
+See [Governance Guide](agent-id-governance-ownership.md#22-responsibility-matrix-raci) for the full responsibility matrix.
+
 | Responsibility | Typical Owner |
 |---|---|
 | Create Agent Identity Blueprints | Entra / IAM team |
@@ -345,21 +321,13 @@ sequenceDiagram
 | Audit & compliance | Security / GRC |
 | Emergency revocation (FIC removal) | Entra / IAM team |
 
-This division is intentional and aligns with least-privilege and separation of duties.
-
 ---
 
 ## 6. Governance controls
 
 ### FIC removal as emergency kill switch
 
-Removing the FIC from the blueprint **instantly disables all agent identities** created from that blueprint. No new tokens can be acquired. However:
-
-- **Cached tokens remain valid for up to 60 minutes** (standard Entra ID access token TTL)
-- For immediate effect, restart the pods to force the sidecar to re-acquire tokens (which will now fail)
-- Re-creating the FIC with the same parameters restores access
-
-This is the primary governance mechanism for disabling agent access at scale.
+Removing the FIC from the blueprint **instantly disables all agent identities** created from that blueprint. Cached tokens remain valid for up to 60 minutes; restart pods to force immediate re-acquisition (which will fail). Re-creating the FIC with the same parameters restores access.
 
 ### Audit trail
 
@@ -382,24 +350,6 @@ Hosting App (AKS pod) — execution environment    (WHERE the agent runs)
 ```
 
 Your AKS pod is replaceable; the agent identity is not.
-
-The blueprint sets boundaries. The agent identity acts within them. The pod is just where code runs.
-
----
-
-## 8. AKS vs Functions -- key differences
-
-| Aspect | AKS | Azure Functions |
-|---|---|---|
-| Federation source | AKS OIDC issuer (external) | Managed Identity (Entra-to-Entra) |
-| FIC subject | `system:serviceaccount:ns:sa` | Managed Identity principal ID |
-| FIC issuer | AKS OIDC issuer URL | `login.microsoftonline.com/.../v2.0` |
-| Token exchange | K8s JWT → FIC → agent token | MSI token → FIC → agent token |
-| SDK deployment | Sidecar container in same pod | Sidecar service or SDK library |
-| Token injection | Workload identity webhook | Managed identity endpoint |
-| Scaling unit | Pod (multi-container) | Function invocation |
-
-Both converge on the same Entra ID token exchange endpoint and produce identical agent identity tokens.
 
 ---
 

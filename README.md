@@ -40,77 +40,37 @@ The key benefit: RBAC roles are assigned to the **agent identity** (not the blue
 
 ### [AKS Agent Identity Guide](./docs/flow-aks-agent-identity.md)
 
-End-to-end guide for running Agent ID on AKS with the Entra SDK sidecar. Covers:
-
-- Seven-step walkthrough from blueprint creation to resource access
-- Microsoft Entra SDK for AgentID sidecar pattern (zero auth code in your app)
-- FIC exchange flow: K8s JWT → exchange token → resource token
-- Interaction diagram and runtime call flow
-- Organizational responsibilities (governance vs dev team)
-- Governance controls: FIC removal as kill switch, token TTL, audit
-- Side-by-side comparison: AKS vs Functions
+End-to-end guide for running Agent ID on AKS with the Entra SDK sidecar. Covers the seven-step walkthrough, sidecar pattern, FIC exchange flow, and governance controls.
 
 ### [AKS Demo Application](./demo-aks/README.md)
 
-Working end-to-end demo with persona-separated scripts. Includes:
+Working demo with persona-separated scripts (00-06). Python Flask app with sidecar writes to Azure Blob Storage. Includes governance demo: disable/re-enable agent access via FIC removal.
 
-- Automated scripts (00-06) covering prerequisites, AKS provisioning, blueprint creation, agent identity, storage RBAC, deployment, and verification
-- Python Flask app with sidecar -- zero auth code, writes to Azure Blob Storage every 60s
-- Governance demo: disable agent access by removing the FIC, verify failure, re-enable
+### [Functions Demo — Python](./demo-functions/README.md)
 
-### [Functions Demo Application](./demo-functions/README.md)
+Azure Functions demo using two-step token exchange (MSI → T1 → TR). Raw HTTP approach (Python SDKs lack `fmi_path` support). Throttled blob writes via agent identity.
 
-Azure Functions demo (Python) using two-step token exchange (MSI → T1 → TR). Includes:
+### [Functions Demo — .NET](./demo-functions-dotnet/README.md)
 
-- Automated scripts (01-06) reusing the same blueprint from the AKS demo
-- Python Function App with raw HTTP token exchange (Python SDKs lack `fmi_path` support)
-- Throttled blob writes via agent identity (60s success / 5s failure cooldown)
-- SDK support matrix explaining why raw HTTP is required for Python
-
-### [Functions Demo Application — .NET](./demo-functions-dotnet/README.md)
-
-Azure Functions demo (C# .NET 8) using the **SDK-native `FmiTransport` pattern**. Includes:
-
-- Same 6-step pipeline as the Python demo (shared infrastructure scripts)
-- .NET implementation using `Azure.Identity` with custom `FmiTransport` (no raw HTTP needed)
-- Three credential classes: `AgentIdentityBlueprintCredential`, `FmiTransport`, `AgentIdentityCredential`
-- Side-by-side comparison with the Python approach
+Azure Functions demo (C# .NET 8) using SDK-native `FmiTransport` pattern. Same pipeline as Python demo but uses `Azure.Identity` with custom transport — no raw HTTP needed.
 
 ### [Functions Agent Identity Guide](./docs/functions-agent-identity.md)
 
-Detailed technical reference for running Agent ID on Azure Functions and App Service. Covers:
+Technical reference for Agent ID on Functions/App Service: two-step token exchange, C# credential classes, SDK support matrix, and comparison with K8s.
 
-- How Functions differs from Kubernetes (managed identity vs projected SA tokens)
-- Architecture and setup (user-assigned MI, FIC configuration)
-- Two-step token exchange mechanics
-- C# credential classes (AgentBlueprintCredential, AgentIdentityCredential, FmiTransport)
-- Autonomous vs interactive agent patterns
-- SDK options (in-code Azure.Identity vs containerized Agent ID SDK)
-- Side-by-side comparison table: K8s vs Functions
+### [Governance & Adoption Guide](./docs/agent-id-governance-ownership.md)
 
-### [Governance, Ownership, and Adoption Guide](./docs/agent-id-governance-ownership.md)
-
-Comprehensive governance reference for enterprise adoption. Covers:
-
-- **Persona definitions** -- Central Platform Team and Agent Development Team with clear ownership boundaries
-- **Responsibility matrix** -- RACI for every activity from tenant enablement to decommissioning
-- **Required Entra roles** -- Per-persona role assignments (Agent ID Administrator, Privileged Role Admin, etc.)
-- **Lifecycle flow** -- End-to-end from blueprint creation through ongoing governance, with handoff points
-- **Code snippets** -- Graph API, PowerShell, C#, and Python examples for both personas
-- **Governance mechanisms** -- Conditional access, access packages, blocked roles/permissions, audit
-- **Adoption roadmap** -- Four phases from prerequisites to production operations
-- **Decision framework** -- Who creates blueprints (central team only), who creates identities (dev team at runtime)
-- **Security guardrails** -- Blocked high-privilege roles, time-bound access, sponsor requirements
+Enterprise governance reference: RACI matrix, required Entra roles, lifecycle flow, code snippets for both personas, access packages, conditional access, and adoption roadmap.
 
 ---
 
 ## Key Concepts
 
-**Agent Identity Blueprint** -- An Entra application registration that serves as the template for a class of agents. Holds the federated identity credential (FIC), defines scopes and conditional access. Created and managed exclusively by the central platform team.
+- **Blueprint** -- Entra app registration serving as the template for a class of agents. Holds the FIC and conditional access policies. Managed by the central platform team.
+- **Agent Identity** -- Runtime service principal created from a blueprint. No credentials of its own. RBAC roles are assigned here.
+- **FIC** -- Federated Identity Credential linking compute (MI or K8s SA) to the blueprint. Configured on the blueprint, not the agent identity.
 
-**Agent Identity** -- A runtime service principal created from a blueprint. Has no credentials of its own. The blueprint impersonates it to obtain resource tokens. Created by the dev team at runtime via the blueprint token.
-
-**Federated Identity Credential (FIC)** -- The trust link between compute infrastructure and the blueprint. Configured on the blueprint application object, not on the agent identity (agent identities have no credentials of their own). On Functions: links a managed identity principal ID. On K8s: links the OIDC issuer URL and service account subject. See [Blueprint concepts](https://learn.microsoft.com/entra/agent-id/identity-platform/agent-blueprint) and [Agent identities](https://learn.microsoft.com/entra/agent-id/identity-platform/agent-identities).
+See [Entra Agent ID docs](https://learn.microsoft.com/entra/agent-id/) for full details.
 
 ---
 

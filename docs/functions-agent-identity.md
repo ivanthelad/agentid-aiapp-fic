@@ -1,39 +1,13 @@
 # Entra Agent ID on Azure Functions
 
-## How a Serverless Agent Uses Agent Identity
+## Functions vs Kubernetes
 
----
+On Functions, the credential source is a Managed Identity (already native to Entra) rather than an external K8s OIDC issuer. No external IdP trust is needed, but the token exchange requires two steps instead of one.
 
-## What This Covers
-
-1. **How Functions differs from Kubernetes** — Managed Identity replaces projected SA tokens
-2. **Control Plane Setup** — Blueprint + Federated Identity Credential with Managed Identity
-3. **Token Exchange** — The two-step flow (MSI → Blueprint → Agent Identity)
-4. **Autonomous vs Interactive Agents** — Two patterns, one platform
-5. **Agent Responsibilities** — What your Function code must (and doesn't have to) do
-6. **SDK Options** — Agent ID SDK companion container vs in-code Azure.Identity
-
----
-
-## The Problem (Same as Kubernetes, Different Mechanics)
-
-> How does an Azure Functions-hosted agent prove who it is to Microsoft Entra
-> — and obtain an **Agent Identity token** for downstream API access?
-
-### On Kubernetes
-
-- Pod gets a projected service account JWT from the cluster OIDC issuer
-- Entra trusts the external Kubernetes IdP via federation
-- Agent exchanges the K8s JWT for an Entra Agent Identity token
-
-### On Azure Functions
-
-- Function App gets a **Managed Identity** token from the Azure platform (IMDS)
-- Managed Identity **is already an Entra identity** — no external IdP needed
-- Agent uses the MSI token as a federated credential to obtain an Agent Identity token
-
-**Key difference:** There is no external OIDC issuer. The federation trust is between
-the managed identity (already in Entra) and the Agent Identity Blueprint.
+| | Kubernetes | Azure Functions |
+|---|---|---|
+| **Credential source** | K8s SA JWT (external OIDC) | MSI token (Entra-native) |
+| **Exchange steps** | 1 | 2 |
 
 ---
 
@@ -44,7 +18,7 @@ the managed identity (already in Entra) and the Agent Identity Blueprint.
 | **Agent Identity Blueprint** | The template (class) in Entra — defines permissions, OBO settings, scopes |
 | **Agent Identity** | A runtime instance -- the actual service principal (`servicePrincipalType: ServiceIdentity`) the agent authenticates as. RBAC roles for resource access must be assigned here, not on the blueprint |
 | **User-Assigned Managed Identity** | An Entra identity assigned to the Function App — the credential source |
-| **Federated Identity Credential (FIC)** | Trust link between the managed identity and the blueprint. Configured on the blueprint, not on the agent identity (agent identities have no credentials of their own). Removing the FIC instantly disables all agent identities under that blueprint (after token cache expiry -- standard 60-minute TTL). See [Blueprint concepts](https://learn.microsoft.com/entra/agent-id/identity-platform/agent-blueprint). |
+| **Federated Identity Credential (FIC)** | Trust link on the blueprint binding it to the managed identity. Removing the FIC disables all agent identities under that blueprint (after token cache expiry -- 60-min TTL). See [Blueprint concepts](https://learn.microsoft.com/entra/agent-id/identity-platform/agent-blueprint). |
 | **Sponsor** | A human user or group accountable for the agent. **Mandatory** for both blueprints and agent identities -- the API returns `Request_BadRequest` without one |
 | **Owner** | A human user or group who can manage the blueprint configuration |
 
@@ -73,37 +47,9 @@ flowchart TD
 
 ---
 
-### The Three-Layer Mental Model
-
-```
-Blueprint             -- governance and policy    (who agents CAN be)
-Agent Identity        -- auditable principal      (who the agent IS)
-Hosting App (Function) -- execution environment   (WHERE the agent runs)
-```
-
-Your Function App is replaceable; the agent identity is not. The blueprint sets boundaries. The agent identity acts within them. The Function is just where code runs.
-
-### Organizational Responsibilities
-
-| Responsibility | Typical Owner |
-|---|---|
-| Create Agent Identity Blueprints | Entra / IAM team |
-| Grant Graph permissions | Entra Global / Privileged Admin |
-| Configure FIC (trust link to MSI) | Entra / IAM team |
-| Create Agent Identities | Platform automation / dev team |
-| Assign Azure RBAC / API permissions | Resource / API owners |
-| Configure Function App + MSI | Application team |
-| Deploy SDK + app code | Application team |
-| Audit & compliance | Security / GRC |
-| Emergency revocation (FIC removal) | Entra / IAM team |
-
----
-
 ## Step 1 — Control Plane Setup (Central / Security Team)
 
 ### 1a. Create a User-Assigned Managed Identity
-
-This managed identity will serve as the **credential** for the blueprint.
 
 ```bash
 az identity create \
@@ -113,12 +59,10 @@ az identity create \
 ```
 
 Record:
-- **Managed Identity Client ID** — for token acquisition
-- **Managed Identity Principal ID** — for the FIC subject
+- **Client ID** — for token acquisition
+- **Principal ID** — for the FIC subject
 
 ### 1b. Create an Agent Identity Blueprint
-
-Using Microsoft Graph (beta):
 
 ```http
 POST https://graph.microsoft.com/beta/applications/
@@ -137,14 +81,9 @@ Content-Type: application/json
 }
 ```
 
-Record the `appId` — this is the **Blueprint Client ID**.
-
-> **Replication delay:** Wait ~30 seconds after blueprint creation before creating the blueprint service principal. Entra ID requires time for directory replication.
+Record the `appId` (this is the **Blueprint Client ID**). Wait ~30 seconds for directory replication before creating the blueprint service principal.
 
 ### 1c. Add the Managed Identity as a Federated Identity Credential
-
-This is the trust link. It tells Entra: *"Accept tokens from this managed identity
-as proof of identity for this blueprint."*
 
 ```http
 POST https://graph.microsoft.com/beta/applications/<blueprint-app-id>/federatedIdentityCredentials
@@ -159,16 +98,9 @@ Content-Type: application/json
 }
 ```
 
-> **Contrast with Kubernetes:** On K8s, the issuer is the cluster OIDC endpoint
-> and the subject is `system:serviceaccount:namespace:sa-name`.
-> On Functions, the issuer is Entra itself and the subject is the managed identity's principal ID.
+> **K8s contrast:** On K8s, the issuer is the cluster OIDC endpoint and subject is `system:serviceaccount:ns:sa`. On Functions, both are Entra-native.
 
-> **Dev/test alternative:** For development and testing, you can add a password credential (client secret) to the blueprint instead of using a managed identity. This simplifies local development but must **never** be used in production:
-> ```http
-> POST https://graph.microsoft.com/beta/applications/<blueprint-object-id>/addPassword
-> { "passwordCredential": { "displayName": "Dev Secret", "endDateTime": "2026-12-31T23:59:59Z" } }
-> ```
-> The blueprint then authenticates using `client_id` + `client_secret` (Basic auth) instead of MSI `client_assertion`. See [astaykov/entra-agent-id-preview-guide](https://github.com/astaykov/entra-agent-id-preview-guide) for a complete demo setup using this approach.
+> **Dev/test alternative:** You can add a client secret to the blueprint instead of MSI for local development (never in production). See [astaykov/entra-agent-id-preview-guide](https://github.com/astaykov/entra-agent-id-preview-guide).
 
 ### 1d. Create the Blueprint Principal
 
@@ -181,8 +113,6 @@ Content-Type: application/json
   "appId": "<blueprint-app-id>"
 }
 ```
-
----
 
 ## Step 2 — Azure Functions Setup (App Team)
 
@@ -204,26 +134,11 @@ az functionapp identity assign \
 | `WEBSITE_AUTH_CLIENT_ID` | Blueprint Client ID (appId) |
 | `MyAgentId` | Agent Identity ID (after creation) |
 
-### What you do NOT need
-
-- No projected volume mounts
-- No service account YAML
-- No OIDC issuer configuration
-- No client secrets or certificates
-
-The managed identity token is obtained automatically from the Azure platform (IMDS).
-
----
-
 ## Step 3 — Token Exchange (The Two-Step Flow)
-
-This is the core difference from Kubernetes. On Functions, the exchange is a
-**two-step process** using the managed identity as the starting credential.
 
 ### Step 3a — Get Blueprint Exchange Token (T1)
 
-The Function uses its managed identity token as a `client_assertion` to obtain
-an exchange token scoped to the blueprint:
+Use the managed identity token as a `client_assertion`:
 
 ```http
 POST https://login.microsoftonline.com/{tenant-id}/oauth2/v2.0/token
@@ -237,12 +152,9 @@ client_id=<BLUEPRINT_CLIENT_ID>
 &grant_type=client_credentials
 ```
 
-Where:
-- `client_assertion` = MSI token obtained from IMDS for audience `api://AzureADTokenExchange`
-- `fmi_path` = the Agent Identity ID (tells Entra which child identity to impersonate)
-- Returns **T1** — the blueprint exchange token
+`client_assertion` is the MSI token from IMDS (audience `api://AzureADTokenExchange`). `fmi_path` specifies which agent identity to impersonate. Returns **T1** (blueprint exchange token).
 
-> **Scope restriction:** `fmi_path` only works with `api://AzureADTokenExchange/.default` scope. Requesting resource scopes directly (e.g., `https://storage.azure.com/.default`) with `fmi_path` returns error `AADSTS70066`. This is why the two-step exchange is **required** -- you cannot skip directly to a resource token.
+> **Scope restriction:** `fmi_path` only works with `api://AzureADTokenExchange/.default`. Requesting resource scopes directly with `fmi_path` returns `AADSTS70066` -- the two-step exchange cannot be skipped.
 
 ### Step 3b — Exchange T1 for Resource Token (TR)
 
@@ -261,51 +173,19 @@ Returns **TR** — the resource access token, issued to the Agent Identity.
 
 ### What Entra validates
 
-1. The MSI token is valid and matches the FIC on the blueprint
-2. The blueprint is the parent of the specified agent identity
-3. The agent identity has the requested permissions
+1. MSI token is valid and matches the FIC on the blueprint
+2. Blueprint is the parent of the specified agent identity
+3. Agent identity has the requested permissions
 
-> **Delegated tokens not supported:** Agent ID APIs reject delegated tokens (e.g., from `az account get-access-token`). Blueprint and agent identity management calls must use `client_credentials` with a dedicated management app that has `Application.ReadWrite.All` and the `Agent ID Administrator` role.
+> **Delegated tokens not supported:** Blueprint and agent identity management calls require `client_credentials` with a dedicated management app that has `Application.ReadWrite.All` and the `Agent ID Administrator` role.
 
-> **Token lifetime:** Resource tokens (TR) have the standard Entra ID TTL of 60 minutes. Plan your caching and refresh accordingly.
-
----
-
-## Sequence Diagram
-
-```
-  Azure Platform          Function App              Entra ID
-       │                      │                        │
-       │── MSI token ────────▶│                        │
-       │   (from IMDS)         │                        │
-       │                      │                        │
-       │                      │── Step 3a ────────────▶│
-       │                      │   POST /token           │
-       │                      │   (MSI as assertion     │
-       │                      │    + fmi_path)          │
-       │                      │                        │
-       │                      │                        │── validates FIC
-       │                      │                        │── matches blueprint
-       │                      │                        │── resolves agent identity
-       │                      │                        │
-       │                      │◀── T1 (exchange token)─│
-       │                      │                        │
-       │                      │── Step 3b ────────────▶│
-       │                      │   POST /token           │
-       │                      │   (T1 as assertion)     │
-       │                      │                        │
-       │                      │◀── TR (resource token)─│
-       │                      │                        │
-       │                      │── Use TR to call API    │
-```
-
----
+> **Token lifetime:** Resource tokens (TR) have a 60-minute TTL.
 
 ## Step 4 — Code Implementation (C#)
 
 ### 4a. Blueprint Credential (Gets T1)
 
-This wraps the MSI → Blueprint exchange into an `Azure.Identity` `TokenCredential`:
+Wraps MSI → Blueprint exchange into an `Azure.Identity` `TokenCredential`:
 
 ```csharp
 internal class AgentIdentityBlueprintCredential : TokenCredential
@@ -346,7 +226,7 @@ internal class AgentIdentityBlueprintCredential : TokenCredential
 
 ### 4b. Agent Identity Credential (Gets TR)
 
-This wraps the Blueprint → Agent Identity exchange:
+Wraps Blueprint → Agent Identity exchange:
 
 ```csharp
 internal class AgentIdentityCredential : TokenCredential
@@ -408,30 +288,17 @@ public async Task<HttpResponseData> Run(
 }
 ```
 
----
-
 ## Autonomous vs Interactive Agents
 
-### Autonomous Agents (app-only)
+**Autonomous** (`client_credentials`): App-only token, no user context. For background processing, scheduled tasks, data pipelines.
 
-- Agent acts on its own behalf using `client_credentials`
-- Token is an **app-only token** scoped to the agent identity
-- No user context — the agent makes independent decisions
-- Use case: background processing, scheduled tasks, data pipelines
+**Interactive** (OBO): Agent acts on behalf of a signed-in user. Requires blueprint to expose a scope. For chat interfaces, copilots, delegated actions.
 
-### Interactive Agents (on-behalf-of)
+The interactive pattern requires a third app registration -- the **AI Application** (front-end):
 
-- Agent acts **on behalf of a signed-in user**
-- Requires the blueprint to expose a scope (e.g., `access_agent`)
-- Uses the OBO flow: user token → blueprint → agent identity → downstream resource
-- Use case: chat interfaces, user-facing copilots, delegated actions
-
-The interactive pattern requires a third app registration -- the **AI Application** -- which represents the front-end the user interacts with. The setup:
-
-1. The blueprint exposes a scope (`api://<blueprint-id>/access_agent`) via `identifierUris` and `oauth2PermissionScopes`
-2. The AI Application's client ID is used in the authorization code flow
-3. The user authenticates and consents to `api://<blueprint-id>/access_agent offline_access`
-4. The AI Application redeems the authorization code for tokens, then performs OBO exchange
+1. Blueprint exposes scope `api://<blueprint-id>/access_agent`
+2. User authenticates via authorization code flow against the AI Application
+3. AI Application redeems code for tokens, then performs OBO exchange
 
 ```http
 # User authorization (browser)
@@ -453,18 +320,13 @@ client_id=<AI_APP_CLIENT_ID>
 &scope=api://<BLUEPRINT_ID>/access_agent offline_access
 ```
 
-Both patterns use the same blueprint and managed identity infrastructure.
-The difference is the grant type and whether a user token is involved.
-
----
-
 ## Digital Colleagues (Agent Users)
 
-Beyond autonomous and interactive agents, Entra Agent ID supports a third pattern -- the **Digital Colleague**. This is a special `agentUser` object that gives the agent its own user identity -- with a mailbox, Teams presence, OneDrive, and calendar.
+A **Digital Colleague** is an `agentUser` object with its own mailbox, Teams presence, OneDrive, and calendar.
 
 ### Creating an Agent User
 
-The Agent User is created as a `microsoft.graph.agentUser` User object (not a service principal), linked to an Agent Identity via `identityParentId`:
+Created as a `microsoft.graph.agentUser`, linked to an Agent Identity via `identityParentId`:
 
 ```http
 POST https://graph.microsoft.com/beta/users
@@ -485,9 +347,9 @@ OData-Version: 4.0
 
 ### Granting Permissions to the Digital Colleague
 
-The Agent User starts with zero permissions. Delegated permissions must be explicitly granted via admin consent:
+Delegated permissions must be explicitly granted via admin consent:
 
-**Option 1 -- Admin Consent URL (browser-based):**
+**Option 1 -- Admin Consent URL:**
 
 ```
 https://login.microsoftonline.com/{tenant-id}/v2.0/adminconsent
@@ -497,7 +359,7 @@ https://login.microsoftonline.com/{tenant-id}/v2.0/adminconsent
   &state=xyz123
 ```
 
-**Option 2 -- Programmatic consent via `oauth2PermissionGrants` API:**
+**Option 2 -- Programmatic consent (`oauth2PermissionGrants`):**
 
 ```http
 POST https://graph.microsoft.com/beta/oauth2PermissionGrants
@@ -516,7 +378,7 @@ Authorization: Bearer <management-app-token>
 
 ### Authenticating as the Digital Colleague
 
-The Digital Colleague uses a **three-step** authentication flow with the custom `user_fic` grant type:
+Three-step flow using the `user_fic` grant type:
 
 **Step 1 -- Blueprint FIC token** (same as autonomous Step 3a, using MSI or client credential):
 
@@ -557,7 +419,7 @@ client_id=<AGENT_IDENTITY_ID>
 &user_federated_identity_credential=<AGENT_IDENTITY_FIC_TOKEN>
 ```
 
-The resulting token carries the Agent User's identity. Calls to `/me` will return the Agent User, and the agent can access its own mailbox, calendar, and Teams.
+The resulting token carries the Agent User's identity (`/me` returns the Agent User).
 
 ### Three Agent Modes -- Comparison
 
@@ -567,63 +429,37 @@ The resulting token carries the Agent User's identity. Calls to `/me` will retur
 | **Interactive (OBO)** | SP acting on behalf of user | Auth code + OBO | Yes (calling user) | Chat interfaces, copilots |
 | **Digital Colleague** | `agentUser` (own mailbox, Teams) | 3 (Blueprint FIC → Agent FIC → User token) | Yes (its own identity) | Send email, join meetings, collaborate |
 
----
-
 ## What You Own vs What the Platform Handles
-
-### Platform handles (Azure Functions + Managed Identity)
 
 | Concern | Handled by |
 |---|---|
 | Credential provisioning | Azure platform (IMDS) |
-| MSI token rotation | Automatic — no manual refresh |
-| Secret storage | None — no secrets exist |
+| MSI token rotation | Automatic |
+| Secret storage | None -- no secrets exist |
 | Scaling | Functions runtime |
-
-### You must implement (or use the SDK for)
-
-| Concern | Your responsibility |
-|---|---|
-| Blueprint token acquisition (T1) | `AgentIdentityBlueprintCredential` |
-| Agent Identity token acquisition (TR) | `AgentIdentityCredential` |
-| Token caching | Azure.Identity handles this internally |
-| Agent identity creation (at startup or on-demand) | Microsoft Graph API call |
-| Error handling (401, 403, 429) | Retry logic in your code |
-
-### What you do NOT need to implement (unlike Kubernetes without sidecar)
-
-- Token expiration tracking — `Azure.Identity` handles caching and refresh
-- Manual token refresh — MSI tokens are auto-rotated by the platform
-- OIDC issuer configuration — not applicable
-- Projected volume mounts — not applicable
-
----
+| Blueprint token acquisition (T1) | Your code (`AgentIdentityBlueprintCredential`) |
+| Agent Identity token acquisition (TR) | Your code (`AgentIdentityCredential`) |
+| Token caching | Azure.Identity (internal) |
+| Agent identity creation | Microsoft Graph API call |
+| Error handling (401, 403, 429) | Your code (retry logic) |
 
 ## SDK Options
 
 ### Option 1: Azure.Identity + Raw HTTP (in-code)
 
-- Use `ManagedIdentityCredential` for MSI token, then raw HTTP POST with `fmi_path` for the exchange
-- The `ClientAssertionCredential` class does **not** support `fmi_path` (causes AADSTS82008)
-- Good for .NET/Python Functions with direct control
+- Use `ManagedIdentityCredential` for MSI token, then raw HTTP POST with `fmi_path`
+- `ClientAssertionCredential` does **not** support `fmi_path` (causes AADSTS82008)
 - Tightest integration, no additional containers
 
 ### Option 2: Microsoft Entra SDK for Agent ID (companion container)
 
-- A containerized web service running alongside your Function
-- Handles all token acquisition/validation via HTTP API endpoints
-- Language-agnostic — call from Python, Node.js, Go, Java, etc.
+- Containerized web service handling all token acquisition/validation via HTTP API
+- Language-agnostic -- call from Python, Node.js, Go, Java, etc.
 - Endpoints: `/Validate`, `/AuthorizationHeader`, `/DownstreamApi`
-- Same concept as the Kubernetes sidecar, adapted for containers
 
 ```
 Function App ──HTTP──▶ Agent ID SDK Container ──▶ Entra ID
 ```
-
-> The SDK companion container is the Functions equivalent of the Kubernetes sidecar.
-> It absorbs all Entra coupling, so your Function code only makes HTTP calls.
-
----
 
 ## Kubernetes vs Functions — Side-by-Side
 
@@ -640,8 +476,6 @@ Function App ──HTTP──▶ Agent ID SDK Container ──▶ Entra ID
 | **Setup complexity** | Higher (OIDC issuer, SA, volumes) | Lower (assign managed identity) |
 | **Infrastructure coupling** | K8s OIDC + Entra federation | Native Azure integration |
 
----
-
 ## Failure Handling
 
 | Code | Meaning | Action |
@@ -652,51 +486,16 @@ Function App ──HTTP──▶ Agent ID SDK Container ──▶ Entra ID
 | `AADSTS700024` | Client assertion validation failed | Verify managed identity is correctly linked as FIC |
 | Network error | Transient IMDS or Entra failure | Retry with backoff |
 
----
-
-## Key Takeaways
-
-1. **Managed Identity replaces projected SA tokens**
-   - No external IdP, no OIDC issuer config — MSI is native to Entra
-
-2. **The federation is Entra-to-Entra**
-   - The FIC links a managed identity (already in Entra) to the blueprint
-
-3. **Two-step token exchange**
-   - MSI → Blueprint exchange token (T1) → Agent Identity resource token (TR)
-
-4. **No secrets ever touch the Function**
-   - MSI tokens come from IMDS — no credentials to manage
-
-5. **Azure.Identity simplifies the lifecycle**
-   - Token caching and refresh are handled by the SDK — unlike bare K8s where you own it
-
-6. **The Agent ID SDK companion container is the serverless sidecar**
-   - Use it for polyglot scenarios or to decouple from Entra protocol details
-
----
-
 ## References
 
-- **Microsoft Docs — Agent Identity on App Service / Functions**
-  - [How to use an agent identity in App Service and Azure Functions](https://learn.microsoft.com/en-us/azure/app-service/overview-agent-identity)
-- **Microsoft Docs — Agent OAuth Protocols**
-  - [Authentication protocols in agents](https://learn.microsoft.com/en-us/entra/agent-id/identity-platform/agent-oauth-protocols)
-- **Microsoft Docs — Autonomous Agent Flow**
-  - [Autonomous app flow](https://learn.microsoft.com/en-us/entra/agent-id/identity-platform/agent-autonomous-app-oauth-flow)
-- **Microsoft Docs — Agent Identity Concepts**
-  - [Key concepts](https://learn.microsoft.com/en-us/entra/agent-id/identity-platform/key-concepts)
-- **Microsoft Docs — Create a Blueprint**
-  - [Create an agent identity blueprint](https://learn.microsoft.com/en-us/entra/agent-id/identity-platform/create-blueprint)
-- **Microsoft Entra SDK for Agent ID**
-  - [SDK overview](https://learn.microsoft.com/en-us/entra/msidweb/agent-id-sdk/overview)
-- **Azure Samples**
-  - [ms-identity-agent-identities](https://github.com/Azure-Samples/ms-identity-agent-identities)
-- **Will Velida — Creating Blueprints with PowerShell and .NET**
-  - [Blog post](https://www.willvelida.com/posts/entra-agent-id-create-agent-blueprints-and-identities/)
-- **Christian Posta — Entra Agent ID on Kubernetes (for comparison)**
-  - [Parts 3 & 4](https://blog.christianposta.com/entra-agent-id-agw/)
-- **astaykov -- Entra Agent ID Preview Guide (REST API + PowerShell)**
-  - [GitHub repo](https://github.com/astaykov/entra-agent-id-preview-guide)
-- **End-to-End Flow: Agent Identity on AKS**
-  - [Parallel walkthrough for Kubernetes + sidecar](flow-aks-agent-identity.md)
+- [Agent Identity on App Service / Functions](https://learn.microsoft.com/en-us/azure/app-service/overview-agent-identity)
+- [Agent OAuth Protocols](https://learn.microsoft.com/en-us/entra/agent-id/identity-platform/agent-oauth-protocols)
+- [Autonomous Agent Flow](https://learn.microsoft.com/en-us/entra/agent-id/identity-platform/agent-autonomous-app-oauth-flow)
+- [Agent Identity Key Concepts](https://learn.microsoft.com/en-us/entra/agent-id/identity-platform/key-concepts)
+- [Create a Blueprint](https://learn.microsoft.com/en-us/entra/agent-id/identity-platform/create-blueprint)
+- [Microsoft Entra SDK for Agent ID](https://learn.microsoft.com/en-us/entra/msidweb/agent-id-sdk/overview)
+- [Azure Samples: ms-identity-agent-identities](https://github.com/Azure-Samples/ms-identity-agent-identities)
+- [Will Velida -- Creating Blueprints with PowerShell and .NET](https://www.willvelida.com/posts/entra-agent-id-create-agent-blueprints-and-identities/)
+- [Christian Posta -- Entra Agent ID on Kubernetes](https://blog.christianposta.com/entra-agent-id-agw/)
+- [astaykov -- Entra Agent ID Preview Guide](https://github.com/astaykov/entra-agent-id-preview-guide)
+- [End-to-End Flow: Agent Identity on AKS](flow-aks-agent-identity.md)

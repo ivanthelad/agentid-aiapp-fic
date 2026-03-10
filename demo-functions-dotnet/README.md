@@ -1,31 +1,6 @@
 # Agent ID Demo — .NET Azure Functions with SDK-Native fmi_path
 
-This demo showcases Microsoft Entra Agent ID on Azure Functions using **.NET 8** and the **SDK-native `FmiTransport` pattern** for the two-step token exchange. It implements the **[autonomous agent](https://www.willvelida.com/posts/entra-agent-id-how-to-auth-to-azure/#two-operation-patterns)** operation pattern -- the agent authenticates under its own identity (not a user's), and the resulting token's `sub`/`oid` claims identify the agent, not the hosting application. It is the C# counterpart of the [Python Functions demo](../demo-functions/README.md).
-
-## Key Difference: SDK-Native vs Raw HTTP
-
-The Python demo uses raw `requests.post()` because Python SDKs don't support `fmi_path`. This .NET demo uses **Azure.Identity's `ClientAssertionCredential`** with a custom `FmiTransport` that injects `fmi_path` as a query parameter -- the approach documented by Microsoft:
-
-```mermaid
-flowchart TD
-    subgraph python["Python Demo (raw HTTP)"]
-        P1["ManagedIdentityCredential.get_token()"]
-        P2["requests.post(TOKEN_URL, data={...fmi_path...})"]
-        P3["requests.post(TOKEN_URL, data={...assertion=T1...})"]
-        P1 -->|MSI token| P2
-        P2 -->|T1| P3
-        P3 -->|Resource token| P4["BlobServiceClient"]
-    end
-
-    subgraph dotnet[".NET Demo (SDK-native FmiTransport)"]
-        D1["ManagedIdentityCredential"]
-        D2["ClientAssertionCredential + FmiTransport"]
-        D3["ClientAssertionCredential"]
-        D1 -->|MSI assertion| D2
-        D2 -->|T1 with fmi_path| D3
-        D3 -->|Resource token| D4["BlobServiceClient"]
-    end
-```
+This is the C# counterpart of the [Python Functions demo](../demo-functions/README.md). It uses Azure.Identity with a custom `FmiTransport` class that injects `fmi_path` into the POST body -- an SDK-native approach not available in Python.
 
 ## Architecture
 
@@ -116,39 +91,13 @@ bash persona-2-developer/05-deploy-function.sh
 bash persona-2-developer/06-verify.sh
 ```
 
-## Two-Step Token Exchange (SDK-Native)
+## Two-Step Token Exchange
 
-Unlike the Python demo which requires raw HTTP POST, the .NET demo uses **Azure.Identity** with a custom `FmiTransport` class that injects `fmi_path` into the HTTP request:
-
-```mermaid
-sequenceDiagram
-    participant Func as Azure Function (.NET)
-    participant MSI as Managed Identity
-    participant FmiT as FmiTransport
-    participant Entra as Microsoft Entra ID
-    participant Storage as Azure Storage
-
-    Func->>MSI: GetTokenAsync(api://AzureADTokenExchange/.default)
-    MSI-->>Func: MSI token
-
-    Note over Func,Entra: Step 1: MSI → Blueprint exchange token (T1)
-    Func->>FmiT: ClientAssertionCredential.GetTokenAsync()
-    FmiT->>Entra: POST /token + fmi_path in form body (injected by FmiTransport)
-    Entra-->>Func: T1 (exchange token)
-
-    Note over Func,Entra: Step 2: T1 → Resource token (TR)
-    Func->>Entra: ClientAssertionCredential (T1 as assertion, agent identity client_id)
-    Entra-->>Func: TR (resource token, oid = agent identity)
-
-    Func->>Storage: PUT blob (Authorization: Bearer TR)
-    Storage-->>Func: 201 Created
-```
+Uses the same two-step MSI → Blueprint → Resource exchange. See [docs/functions-agent-identity.md](../docs/functions-agent-identity.md) for the detailed flow.
 
 ### The FmiTransport Pattern
 
-The key innovation is the `FmiTransport` class -- a custom `HttpClientTransport` that injects `fmi_path` into token endpoint requests. The [Microsoft docs](https://learn.microsoft.com/en-us/azure/app-service/overview-agent-identity?tabs=autonomous-agents#obtain-tokens-with-the-identity) show `AppendQuery`, but **the Entra token endpoint requires `fmi_path` in the POST body** (form-urlencoded), not as a URL query parameter. Using query params causes AADSTS82008.
-
-Our implementation intercepts POST requests to `oauth2/v2.0/token` and appends `fmi_path` to the form body:
+`FmiTransport` is a custom `HttpClientTransport` that intercepts POST requests to `oauth2/v2.0/token` and appends `fmi_path` to the form body. The Entra token endpoint requires `fmi_path` in the POST body (form-urlencoded), not as a URL query parameter.
 
 ```csharp
 public class FmiTransport(string agentIdentityId) : HttpClientTransport()
@@ -165,7 +114,6 @@ public class FmiTransport(string agentIdentityId) : HttpClientTransport()
         var uri = message.Request.Uri.ToString();
         if (!uri.Contains("oauth2/v2.0/token")) return;
 
-        // Read existing form body and append fmi_path
         using var ms = new MemoryStream();
         message.Request.Content.WriteTo(ms, default);
         var body = Encoding.UTF8.GetString(ms.ToArray());
@@ -175,17 +123,6 @@ public class FmiTransport(string agentIdentityId) : HttpClientTransport()
 }
 ```
 
-This transport is passed to `ClientAssertionCredentialOptions.Transport` when creating the blueprint credential:
-
-```csharp
-var blueprintCredential = new AgentIdentityBlueprintCredential(
-    tenantId, blueprintId, miClientId,
-    new ClientAssertionCredentialOptions
-    {
-        Transport = new FmiTransport(agentIdentityId) // ← injects fmi_path
-    });
-```
-
 ### Three Credential Classes
 
 | Class | Role | Input | Output |
@@ -193,16 +130,6 @@ var blueprintCredential = new AgentIdentityBlueprintCredential(
 | `AgentIdentityBlueprintCredential` | MSI → blueprint token | MSI token as assertion | Blueprint exchange token |
 | `FmiTransport` | Injects `fmi_path` into POST body | HTTP request | Modified HTTP request |
 | `AgentIdentityCredential` | Full two-step exchange | Config values | Resource token (oid = agent identity) |
-
-### SDK Support Comparison
-
-| SDK | Language | `fmi_path` support | Approach used |
-|---|---|---|---|
-| **Azure.Identity (.NET)** | C# | ✅ via `FmiTransport` | Custom `HttpClientTransport` |
-| **MSAL.NET** | C# | ✅ `WithFmiPath()` | First-class API |
-| **Microsoft.Identity.Web** | C# | ✅ `FmiPath` on `TokenAcquisitionOptions` | Had [bug #3336](https://github.com/AzureAD/microsoft-identity-web/issues/3336), fixed |
-| **MSAL Python** | Python | ❌ | Not supported |
-| **azure-identity (Python)** | Python | ❌ | Not supported -- uses raw HTTP |
 
 ## What the Function App Does
 
@@ -218,18 +145,6 @@ A .NET Azure Function with zero secrets -- all authentication handled via manage
 - **Success**: 60s cooldown before next write
 - **Failure**: 5s cooldown before retry
 - Returns cached result with `throttled: true` and `next_write_in` seconds within the cooldown window
-
-## Python vs .NET Comparison
-
-| Aspect | Python Demo | .NET Demo |
-|---|---|---|
-| Runtime | Python 3.11 | .NET 8 (isolated worker) |
-| `fmi_path` approach | Raw `requests.post()` | SDK-native `FmiTransport` |
-| Token exchange code | ~30 lines (manual HTTP) | ~15 lines (SDK wiring) |
-| Dependencies | azure-identity, requests | Azure.Identity (built-in) |
-| Build step | None (Python) | `dotnet publish` |
-| Auth code in app | Manual HTTP + credential class | Credential class composition |
-| Debugging | See exact HTTP requests | SDK handles retry, logging |
 
 ## Cleanup
 

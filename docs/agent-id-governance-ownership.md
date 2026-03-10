@@ -1,22 +1,8 @@
 # Entra Agent ID -- Governance, Ownership, and Adoption Guide
 
-## A Responsibility Model for Central Platform Teams and Agent Development Teams
-
----
-
 ## 1. Purpose
 
-This document defines the end-to-end responsibility model for adopting Microsoft Entra Agent ID in an enterprise. It answers:
-
-- Who creates blueprints, and who creates agent identities?
-- What Entra roles and Graph API permissions does each persona require?
-- What does the central platform team own versus what agent development teams own?
-- How are permissions governed, audited, and time-bound?
-- What does the adoption roadmap look like from zero to production?
-
-The target audience is organizations with a central identity or platform team that provisions and governs infrastructure on behalf of multiple internal agent development teams.
-
----
+This document defines the end-to-end responsibility model for adopting Microsoft Entra Agent ID in an enterprise -- covering blueprint and agent identity ownership, required Entra roles and Graph permissions, permission governance, and the adoption roadmap from zero to production. It targets organizations with a central platform team that provisions identity infrastructure on behalf of multiple agent development teams.
 
 ## 2. Personas and Responsibilities
 
@@ -44,27 +30,19 @@ flowchart LR
 | Activity | Central Platform | Agent Dev Team |
 |---|---|---|
 | Enable Agent ID in tenant | Responsible | -- |
-| Create user-assigned managed identity | Responsible | Consulted |
-| Create agent identity blueprint | Responsible | Consulted |
-| Configure FIC on blueprint | Responsible | -- |
-| Create blueprint principal | Responsible | -- |
-| Configure identifier URI and scopes | Responsible | Consulted |
-| Set up conditional access policies | Responsible | -- |
-| Create access packages | Accountable | Consulted |
+| Create managed identity, blueprint, FIC, and principal | Responsible | Consulted |
+| Configure identifier URI, scopes, and conditional access | Responsible | Consulted |
+| Create and manage access packages | Accountable | Consulted |
 | Assign managed identity to compute | Responsible | Consulted |
-| Provide blueprint ID and MI client ID to dev team | Responsible | Informed |
+| Provide blueprint ID, MI client ID, and agent identity ID to dev team | Responsible | Informed |
 | Designate sponsor for agent identities | Responsible | Consulted |
-| Create agent identities at runtime | Responsible | Consulted |
+| Create agent identities | Responsible | Consulted |
 | Implement token exchange logic | -- | Responsible |
 | Request access packages for agents | -- | Responsible |
 | Grant app role assignments (admin consent) | Responsible | Consulted |
-| Monitor agent identity audit logs | Responsible | Informed |
-| Disable or delete agent identities | Responsible | Consulted |
-| Respond to security incidents | Responsible | Consulted |
+| Monitor audit logs, disable/delete agents, respond to incidents | Responsible | Informed/Consulted |
 
 ### 2.3 Agent Modes
-
-Entra Agent ID supports three distinct agent modes, each with different identity types and governance implications:
 
 | Mode | Identity Type | Created By | Governance Notes |
 |---|---|---|---|
@@ -72,38 +50,31 @@ Entra Agent ID supports three distinct agent modes, each with different identity
 | **Interactive (OBO)** | Agent Identity acting on behalf of user | Central team | Carries user security context; requires exposed scope on blueprint |
 | **Digital Colleague** | Agent User (`microsoft.graph.agentUser`) | Central team or management app | Has own mailbox, Teams, calendar; requires delegated permission consent |
 
-The **Digital Colleague** is a special User object linked to an Agent Identity via `identityParentId`. Unlike the other two modes, this agent has its own UPN, can send and receive email, join Teams meetings, and maintain a calendar. The additional governance considerations for Digital Colleagues:
-
-- **Creation:** Requires `User.ReadWrite.All` (preview) and the management app token
-- **Permissions:** Must be explicitly granted via admin consent URL or `oauth2PermissionGrants` API
-- **Zero default access:** The Agent User starts with no permissions to any resources
-- **Audit:** Appears as a distinct user in sign-in and audit logs
-
----
+A **Digital Colleague** is a User object (linked via `identityParentId`) with its own UPN, mailbox, Teams, and calendar. Creation requires `User.ReadWrite.All` (preview) and a management app token. Permissions are granted via admin consent URL or `oauth2PermissionGrants` API. Starts with zero default access; appears as a distinct user in audit logs.
 
 ## 3. Required Entra Roles and Graph Permissions
 
 ### 3.1 Central Platform Team Roles
 
-| Entra Role | Purpose | Scope |
-|---|---|---|
-| **Privileged Role Administrator** | Grant Microsoft Graph application permissions to client apps used for blueprint management | Tenant-wide |
-| **Cloud Application Administrator** (or Application Administrator) | Grant Microsoft Graph delegated permissions | Tenant-wide |
-| **Agent ID Administrator** | Full lifecycle management of all agent blueprints and identities in the tenant, including creation, updates, and deletion of any agent object | Tenant-wide |
-| **Identity Governance Administrator** | Create and manage access packages, configure entitlement management catalogs | Tenant-wide |
-| **Conditional Access Administrator** | Apply conditional access policies scoped to blueprints | Tenant-wide |
+| Entra Role | Purpose |
+|---|---|
+| **Privileged Role Administrator** | Grant Graph application permissions to client apps for blueprint management |
+| **Cloud Application Administrator** | Grant Graph delegated permissions |
+| **Agent ID Administrator** | Full lifecycle management of all agent blueprints and identities |
+| **Identity Governance Administrator** | Create and manage access packages and entitlement catalogs |
+| **Conditional Access Administrator** | Apply conditional access policies scoped to blueprints |
 
 ### 3.2 Agent Development Team Roles
 
-| Role | Purpose | Scope |
-|---|---|---|
-| **Owner** (object-level, not Entra role) | Modify blueprint properties, manage credentials, add other owners; assigned per blueprint by the central team | Per-blueprint |
+| Role | Purpose |
+|---|---|
+| **Owner** (object-level, not Entra role) | Modify blueprint properties, manage credentials, add other owners; assigned per blueprint |
 
-The agent development team does not require Entra directory roles. Blueprint creation, agent identity creation, and management are exclusively handled by the central platform team. Dev teams consume agent identities provided by the central team and implement token exchange logic in their applications.
+The agent development team does not require Entra directory roles. They consume agent identities provided by the central team and implement token exchange logic.
 
 ### 3.3 Sponsor Requirement
 
-Entra requires every agent identity and blueprint to have a designated human sponsor. This is an object-level relationship, not an Entra directory role. The central platform team designates sponsors during blueprint creation. Sponsors can enable or disable agent identities via the My Account portal and receive access package expiration notifications. When a sponsor leaves the organization, sponsorship automatically transfers to their manager.
+Every blueprint and agent identity must have a human sponsor. The central platform team designates sponsors during creation; sponsors can enable/disable agent identities via the My Account portal and receive access package expiration notifications. Sponsorship auto-transfers to the departing sponsor's manager.
 
 ### 3.4 Graph API Permissions by Activity
 
@@ -121,93 +92,54 @@ Entra requires every agent identity and blueprint to have a designated human spo
 | Grant delegated permissions to agent identity | `DelegatedPermissionGrant.ReadWrite.All` | Application | Central team |
 | Script: expose API / add credentials on blueprint | `Application.ReadWrite.OwnedBy` | Application | Central team (automation) |
 
-> **Preview note:** The `User.ReadWrite.All` permission is required during the preview period to create Agent Users (Digital Colleagues). This is a `User` object with type `microsoft.graph.agentUser`. This permission requirement is expected to be reduced or scoped differently before GA. The `Application.ReadWrite.OwnedBy` permission is only needed if the management app scripts need to modify the blueprint it owns (e.g., expose an API, add credentials).
-
----
+> **Preview note:** `User.ReadWrite.All` is required during preview to create Agent Users (Digital Colleagues). This requirement is expected to change before GA. `Application.ReadWrite.OwnedBy` is only needed if the management app scripts modify the blueprint it owns.
 
 ## 4. Lifecycle Flow -- Blueprint to Agent Identity
 
 ### 4.1 End-to-End Flow Diagram
 
 ```
-                    CENTRAL PLATFORM TEAM                         AGENT DEV TEAM
-                    =====================                         ==============
+CENTRAL PLATFORM TEAM                              AGENT DEV TEAM
+=====================                              ==============
 
 Phase 1: Foundation
-    |
-    |-- [1] Enable Agent ID in M365 admin center
-    |-- [2] Assign Agent ID Administrator role to platform operators
-    |-- [3] Assign Privileged Role Administrator for Graph permission grants
-    |
+  [1] Enable Agent ID in M365 admin center
+  [2] Assign Agent ID Administrator role
+  [3] Assign Privileged Role Administrator
+
 Phase 2: Blueprint Provisioning
-    |
-    |-- [4] Create user-assigned managed identity (Azure CLI)
-    |-- [5] Create agent identity blueprint (Graph API)
-    |       |-- Set display name, sponsor, owner
-    |-- [6] Add managed identity as FIC on blueprint
-    |-- [7] Create blueprint principal in tenant
-    |-- [8] Configure identifier URI and scopes (if interactive)
-    |-- [9] (Optional) Configure conditional access policy on blueprint
-    |
-    |-- [10] Hand off to dev team:
-    |         - Blueprint client ID (appId)
-    |         - Managed identity client ID
-    |         - Managed identity resource ID
-    |         - Tenant ID
-    |
-    +-----------------------------------------------+
-                                                    |
-                                                    v
-Phase 3: Agent Identity Creation             [11] Central team calls Graph API
-                                                    |  to create agent identity
-                                                    |  (using blueprint token)
-                                                    |-- Set sponsor
-                                                    |-- Record agent identity ID
-                                                    |-- Hand off identity ID to dev team
-                                                    |
-Phase 3a: Digital Colleague (optional)        [11a] Create Agent User
-                                                    |  (microsoft.graph.agentUser)
-                                                    |  (requires management app token)
-                                              [11b] Grant admin consent for
-                                                    |  delegated permissions
-                                                    |
-Phase 4: Agent Deployment                    [12] Assign MI to compute
-                                                    |  (Function App, K8s, App Service)
-                                             [13] Configure app settings
-                                                    |
-Phase 5: Permission Assignment               [14] Request access package
-                                                    |  (agent, sponsor, or admin)
-                                             [15] Admin grants app role
-                                                    |  assignments if needed
-                                                    |
-Phase 6: Token Usage                         [16] Exchange tokens:
-                                                    |  MSI -> T1 -> TR  (Functions)
-                                                    |  SA JWT -> TR     (K8s)
-                                             [17] Call downstream APIs
-                                                    |  using agent identity token
-                                                    |
-Phase 7: Ongoing Governance           <------+
-    |
-    |-- [18] Monitor audit logs (central team)
-    |-- [19] Review and renew access packages (central team)
-    |-- [20] Conditional access enforcement
-    |-- [21] Disable/delete agents when decommissioned
+  [4] Create user-assigned managed identity
+  [5] Create agent identity blueprint (set display name, sponsor, owner)
+  [6] Add managed identity as FIC on blueprint
+  [7] Create blueprint principal in tenant
+  [8] Configure identifier URI and scopes (if interactive)
+  [9] (Optional) Configure conditional access policy
+  [10] Hand off to dev team: blueprint appId, MI client ID, MI resource ID, tenant ID
+
+Phase 3: Agent Identity Creation
+  [11] Create agent identity via Graph API      --> Hand off identity ID to dev team
+       (using blueprint token, set sponsor)
+
+Phase 3a: Digital Colleague (optional)
+  [11a] Create Agent User (microsoft.graph.agentUser)
+  [11b] Grant admin consent for delegated permissions
+
+Phase 4-5: Deployment & Permissions              [12] Assign MI to compute
+                                                  [13] Configure app settings
+                                                  [14] Request access package
+                                                  [15] Admin grants app roles if needed
+
+Phase 6: Token Usage                             [16] Exchange tokens:
+                                                       MSI -> T1 -> TR (Functions)
+                                                       SA JWT -> TR    (K8s)
+                                                  [17] Call downstream APIs
+
+Phase 7: Ongoing Governance
+  [18] Monitor audit logs
+  [19] Review and renew access packages
+  [20] Conditional access enforcement
+  [21] Disable/delete agents when decommissioned
 ```
-
-### 4.2 Phase Ownership Summary
-
-| Phase | Owner | Key Output |
-|---|---|---|
-| 1. Foundation | Central Platform Team | Tenant enabled, roles assigned |
-| 2. Blueprint Provisioning | Central Platform Team | Blueprint + FIC + principal created |
-| 3. Agent Identity Creation | Central Platform Team | Agent identity exists, ID handed off |
-| 3a. Digital Colleague Setup (optional) | Central Team | Agent User created, permissions consented |
-| 4. Agent Deployment | Agent Dev Team (with central support) | Compute configured with MI |
-| 5. Permission Assignment | Central Team (approvals), Dev Team (requests) | Agent has scoped access |
-| 6. Token Usage | Agent Dev Team | Agent authenticates and calls APIs |
-| 7. Ongoing Governance | Central Platform Team | Continuous oversight |
-
----
 
 ## 5. Code Snippets -- Central Platform Team
 
@@ -346,7 +278,7 @@ az webapp identity assign \
 
 ### 5.8 Grant an App Role to an Agent Identity
 
-After the central team creates an agent identity and provides its ID:
+After the central team creates an agent identity:
 
 ```http
 POST https://graph.microsoft.com/v1.0/servicePrincipals/<agent-identity-id>/appRoleAssignments
@@ -359,8 +291,6 @@ Content-Type: application/json
   "appRoleId": "<app-role-id>"
 }
 ```
-
----
 
 ## 6. Code Snippets -- Agent Development Team
 
@@ -548,8 +478,6 @@ headers = {"Authorization": f"Bearer {token}"}
 users = requests.get("https://graph.microsoft.com/v1.0/users", headers=headers)
 ```
 
----
-
 ## 7. Governance Mechanisms
 
 ### 7.1 Architecture -- Governance Controls
@@ -569,30 +497,15 @@ flowchart LR
 
 ### 7.2 Conditional Access
 
-The central team applies conditional access policies at the blueprint level. All agent identities created from that blueprint inherit the policy. Examples:
-
-- Require compliant device for interactive agent flows
-- Block agent authentication from outside approved IP ranges
-- Enforce session controls for agents accessing sensitive data
+Conditional access policies are applied at the blueprint level and inherited by all child agent identities. Examples: require compliant device for interactive flows, block authentication from unapproved IPs, enforce session controls for sensitive data access.
 
 ### 7.3 Access Packages (Entitlement Management)
 
-Access packages are the primary mechanism for granting permissions to agent identities. They provide:
-
-- **Time-bound access**: Permissions expire automatically
-- **Approval workflows**: Sponsor or admin must approve
-- **Auditable assignments**: Every grant is logged
-- **Renewal with re-approval**: Sponsor must justify continued access
-
-Resources that can be packaged:
-
-- Security group memberships
-- OAuth application permissions (including Graph API)
-- Microsoft Entra directory roles (from the allowed list)
+Access packages are the primary mechanism for granting permissions to agent identities. They provide time-bound, approval-gated, auditable permission assignments that require sponsor re-approval on renewal. Packageable resources include security group memberships, OAuth application permissions (including Graph API), and Microsoft Entra directory roles (from the allowed list).
 
 ### 7.3a Admin Consent for Agent Identities
 
-While access packages govern ongoing permission lifecycle, the **initial** permission grants for agent identities (particularly Digital Colleagues) use admin consent mechanisms:
+Initial permission grants for agent identities (particularly Digital Colleagues) use admin consent. For ongoing lifecycle governance, use access packages.
 
 **Browser-based admin consent:**
 
@@ -604,10 +517,7 @@ https://login.microsoftonline.com/{tenant-id}/v2.0/adminconsent
   &state=xyz123
 ```
 
-Parameters:
-- `client_id`: The Agent Identity's client ID (note: `object_id = client_id` for agent identities)
-- `scope`: The delegated permissions to grant
-- `redirect_uri`: Use `https://entra.microsoft.com/TokenAuthorize` as a standard callback
+Use the agent identity's client ID (which equals `object_id` for agent identities). The `redirect_uri` should be `https://entra.microsoft.com/TokenAuthorize`.
 
 **Programmatic consent via `oauth2PermissionGrants` API:**
 
@@ -626,13 +536,11 @@ Authorization: Bearer <management-app-token>
 }
 ```
 
-The management application requires the `DelegatedPermissionGrant.ReadWrite.All` application permission to grant consent programmatically.
-
-> **Governance note:** Admin consent grants initial access. For ongoing governance, use access packages to ensure time-bound, reviewable, and revocable permissions. The two mechanisms are complementary -- admin consent for bootstrapping, access packages for lifecycle management.
+Requires `DelegatedPermissionGrant.ReadWrite.All` application permission on the management app.
 
 ### 7.4 Blocked Permissions and Roles
 
-Microsoft Entra enforces guardrails. Agent identities cannot be assigned:
+Agent identities cannot be assigned:
 
 | Blocked | Reason |
 |---|---|
@@ -647,65 +555,45 @@ Microsoft Entra enforces guardrails. Agent identities cannot be assigned:
 
 ### 7.5 Audit and Monitoring
 
-All agent identity operations are recorded in the Entra audit log:
+Entra audit logs record all agent identity operations: blueprint CRUD, agent identity creation/deletion, token exchanges (sign-in logs), app role assignments, consent grants, and access package assignments/expirations.
 
-- Blueprint creation, modification, deletion
-- Agent identity creation and deletion
-- Token exchanges (via sign-in logs)
-- App role assignments and consent grants
-- Access package assignments and expirations
-
-The central team should configure:
-
-- Log Analytics workspace integration
-- Alert rules for unexpected agent identity creation
-- Periodic access reviews via ID Governance
-
----
+The central team should configure Log Analytics workspace integration, alert rules for unexpected agent identity creation, and periodic access reviews via ID Governance.
 
 ## 8. Adoption Roadmap
 
-### Phase 0 -- Prerequisites
+### Phase 0-1 -- Prerequisites and Tenant Configuration
 
 | Step | Action | Owner | Dependency |
 |---|---|---|---|
 | 0.1 | Obtain Microsoft 365 Copilot license | Central Team | Budget approval |
 | 0.2 | Enable Agent ID in M365 admin center | Central Team | License |
 | 0.3 | Verify Entra Agent ID features are available | Central Team | Agent ID enabled |
-
-### Phase 1 -- Tenant Configuration
-
-| Step | Action | Owner | Dependency |
-|---|---|---|---|
-| 1.1 | Assign Agent ID Administrator to platform operators | Central Team | Phase 0 |
-| 1.2 | Assign Privileged Role Administrator for Graph permission grants | Central Team | Phase 0 |
+| 1.1 | Assign Agent ID Administrator to platform operators | Central Team | 0.3 |
+| 1.2 | Assign Privileged Role Administrator for Graph permission grants | Central Team | 0.3 |
 | 1.3 | Configure entitlement management catalog for agent resources | Central Team | 1.1 |
 
 ### Phase 2 -- Blueprint Provisioning (per agent class)
 
 | Step | Action | Owner | Dependency |
 |---|---|---|---|
-| 2.1 | Create user-assigned managed identity in Azure | Central Team | Phase 1 |
+| 2.1 | Create user-assigned managed identity in Azure | Central Team | Phase 0-1 |
 | 2.2 | Create agent identity blueprint via Graph API | Central Team | 2.1 |
 | 2.3 | Add managed identity as FIC on blueprint | Central Team | 2.1, 2.2 |
 | 2.4 | Create blueprint principal | Central Team | 2.2 |
-| 2.5 | Configure scopes (if interactive agents) | Central Team | 2.2 |
-| 2.6 | Apply conditional access policy to blueprint | Central Team | 2.4 |
-| 2.7 | Create access package with required resource roles | Central Team | 2.4 |
-| 2.8 | Create agent identity instance | Central Team | 2.4 |
-| 2.9 | Hand off configuration values (incl. agent identity ID) to dev team | Central Team | 2.1-2.8 |
+| 2.5 | Configure scopes (if interactive), conditional access, access package | Central Team | 2.4 |
+| 2.6 | Create agent identity instance | Central Team | 2.4 |
+| 2.7 | Hand off config values (incl. agent identity ID) to dev team | Central Team | 2.1-2.6 |
 
 ### Phase 3 -- Agent Development and Deployment
 
 | Step | Action | Owner | Dependency |
 |---|---|---|---|
-| 3.1 | Receive blueprint ID, MI client ID, agent identity ID, tenant ID | Dev Team | 2.9 |
+| 3.1 | Receive blueprint ID, MI client ID, agent identity ID, tenant ID | Dev Team | 2.7 |
 | 3.2 | Assign managed identity to compute (Functions, K8s, App Service) | Dev Team / Central | 2.1, 3.1 |
-| 3.3 | (Optional) Create Agent User (Digital Colleague) | Central Team | 2.8 |
-| 3.3a | (Optional) Grant admin consent for Agent User permissions | Central Team | 3.3 |
+| 3.3 | (Optional) Create Agent User and grant admin consent | Central Team | 2.6 |
 | 3.4 | Implement token exchange credential classes | Dev Team | 3.1 |
 | 3.5 | Designate sponsor for each agent identity | Central Team | Business alignment |
-| 3.6 | Request access packages for agent identities | Dev Team | 2.7, 2.8 |
+| 3.6 | Request access packages for agent identities | Dev Team | 2.5, 2.6 |
 | 3.7 | Test token acquisition and downstream API calls | Dev Team | 3.4, 3.6 |
 | 3.8 | Deploy to production | Dev Team | 3.7 |
 
@@ -717,117 +605,54 @@ The central team should configure:
 | 4.2 | Review and renew access packages | Central Team | On expiration |
 | 4.3 | Rotate managed identity (if needed) | Central Team | Per policy |
 | 4.4 | Update conditional access as threat landscape changes | Central Team | Quarterly |
-| 4.5 | Decommission agent identities when agents are retired | Dev Team + Central Team | On retirement |
-| 4.6 | Delete agent identities before deleting blueprint | Central Team | On blueprint retirement |
-
----
+| 4.5 | Decommission and delete agent identities when retired | Dev Team + Central Team | On retirement |
 
 ## 9. Decision Framework
 
 ### 9.1 Who Creates Blueprints?
 
-**Central Platform Team**
-
-Rationale:
-
-- Blueprints define the security boundary for an entire class of agents
-- FIC configuration requires access to managed identity infrastructure
-- Conditional access and access packages must be applied consistently
-- The Agent ID Administrator role should be tightly held
+**Central Platform Team.** Blueprints define the security boundary for an entire class of agents, require managed identity infrastructure access, and need consistent conditional access and access package configuration. The Agent ID Administrator role should be tightly held.
 
 ### 9.2 Who Creates Agent Identities?
 
-**Recommended: Agent Development Team (at runtime)**
-
-Rationale:
-
-- Agent identities are runtime objects tied to specific agent instances
-- Creation happens programmatically via the blueprint token
-- The blueprint itself authorizes the creation (no additional Entra role needed)
-- Each agent identity should have a distinct sponsor designated by the central team
+**Central Platform Team (recommended).** Agent identities are runtime objects created via the blueprint token (no additional Entra role needed). Each agent identity should have a distinct sponsor designated by the central team.
 
 ### 9.3 Who Manages Permissions?
 
-**Shared Responsibility:**
+**Shared.** The central team creates access packages and approves grants. The dev team requests access packages for each agent identity. The central team reviews and renews on expiration.
 
-- The central team creates access packages and defines what permissions are available
-- The dev team requests specific access packages for each agent identity
-- The central team or designated approvers grant consent
-- The central team reviews and renews access on expiration
+### 9.4 Decision Checklist
 
-### 9.4 Decision Tree
-
-```
-                       Need an agent identity?
-                              |
-                              v
-               Does a blueprint exist for this agent class?
-              /                                           \
-           Yes                                            No
-            |                                              |
-            v                                              v
-   Central team creates agent               Central team creates blueprint
-   identity using blueprint                 (managed identity + FIC + principal)
-            |                                              |
-            v                                              v
-   Hand off agent identity ID              Hand off config to dev team
-   to dev team                                             |
-            |                                              v
-            v                                    Return to "Yes" branch
-   Does the agent need
-   access to resources?
-            |
-            v
-   Request access package
-   (dev team)
-            |
-            v
-   Approver grants access
-            |
-            v
-   Agent uses token exchange
-   to call downstream APIs
-```
-
----
+1. Does a blueprint exist? → No: Central team creates one
+2. Central team creates agent identity from blueprint
+3. Central team hands off identity ID + config to dev team
+4. Dev team requests access packages for the agent identity
+5. Dev team deploys app with token exchange credentials
 
 ## 10. Security Guardrails Summary
 
 | Guardrail | Enforced By | Description |
 |---|---|---|
 | No client secrets in production | Policy | Managed identities or certificates only |
-| No high-privilege Entra roles | Entra platform | Blocked list prevents Global Admin, Priv Role Admin, etc. |
+| No high-privilege Entra roles | Entra platform | Global Admin, Priv Role Admin, etc. blocked |
 | No high-privilege Graph permissions | Entra platform | Application.ReadWrite.All, RoleManagement.ReadWrite.All blocked |
 | Time-bound access | Access packages | Permissions expire and require renewal |
-| Human accountability | Entra platform | Every agent identity must have a designated sponsor (managed by central team) |
-| Lifecycle continuity | Lifecycle workflows | Sponsorship auto-transfers to manager on departure |
-| Blueprint-scoped policies | Conditional access | Policies applied to blueprint affect all child agent identities |
+| Human accountability | Entra platform | Every agent identity must have a sponsor |
+| Lifecycle continuity | Lifecycle workflows | Sponsorship auto-transfers on departure |
+| Blueprint-scoped policies | Conditional access | Policies on blueprint affect all child agents |
 | Audit trail | Entra audit logs | All operations logged and queryable |
-| Credential isolation | Managed identity + FIC | No secrets in code, config, or environment variables |
-
----
+| Credential isolation | Managed identity + FIC | No secrets in code, config, or env vars |
 
 ## 11. References
 
-- Microsoft Entra Agent ID Documentation
-  - https://learn.microsoft.com/entra/agent-id/
-- Administrative Relationships (Owners, Sponsors, Managers)
-  - https://learn.microsoft.com/entra/agent-id/identity-platform/agent-owners-sponsors-managers
-- Create an Agent Identity Blueprint
-  - https://learn.microsoft.com/entra/agent-id/identity-platform/create-blueprint
-- Create and Delete Agent Identities
-  - https://learn.microsoft.com/entra/agent-id/identity-platform/create-delete-agent-identities
-- Authorization in Agent ID
-  - https://learn.microsoft.com/entra/agent-id/identity-professional/authorization-agent-id
-- Governing Agent Identities
-  - https://learn.microsoft.com/entra/id-governance/agent-id-governance-overview
-- Access Packages for Agent Identities
-  - https://learn.microsoft.com/entra/agent-id/identity-professional/agent-access-packages
-- Agent Identity on App Service and Azure Functions
-  - https://learn.microsoft.com/azure/app-service/overview-agent-identity
-- Agent OAuth Protocols
-  - https://learn.microsoft.com/entra/agent-id/identity-platform/agent-oauth-protocols
-- Entra Built-in Roles Reference
-  - https://learn.microsoft.com/entra/identity/role-based-access-control/permissions-reference
-- astaykov -- Entra Agent ID Preview Guide (REST API, PowerShell, Insomnia)
-  - https://github.com/astaykov/entra-agent-id-preview-guide
+- [Microsoft Entra Agent ID Documentation](https://learn.microsoft.com/entra/agent-id/)
+- [Administrative Relationships (Owners, Sponsors, Managers)](https://learn.microsoft.com/entra/agent-id/identity-platform/agent-owners-sponsors-managers)
+- [Create an Agent Identity Blueprint](https://learn.microsoft.com/entra/agent-id/identity-platform/create-blueprint)
+- [Create and Delete Agent Identities](https://learn.microsoft.com/entra/agent-id/identity-platform/create-delete-agent-identities)
+- [Authorization in Agent ID](https://learn.microsoft.com/entra/agent-id/identity-professional/authorization-agent-id)
+- [Governing Agent Identities](https://learn.microsoft.com/entra/id-governance/agent-id-governance-overview)
+- [Access Packages for Agent Identities](https://learn.microsoft.com/entra/agent-id/identity-professional/agent-access-packages)
+- [Agent Identity on App Service and Azure Functions](https://learn.microsoft.com/azure/app-service/overview-agent-identity)
+- [Agent OAuth Protocols](https://learn.microsoft.com/entra/agent-id/identity-platform/agent-oauth-protocols)
+- [Entra Built-in Roles Reference](https://learn.microsoft.com/entra/identity/role-based-access-control/permissions-reference)
+- [astaykov -- Entra Agent ID Preview Guide](https://github.com/astaykov/entra-agent-id-preview-guide)

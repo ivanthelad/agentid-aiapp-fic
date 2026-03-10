@@ -1,6 +1,8 @@
-# Agent ID Demo — Workload Identity Federation on AKS
+# Agent ID Demo — AKS with Entra SDK Sidecar
 
-This demo showcases Microsoft Entra Agent ID with clear persona separation between a Central AI Governance Team and an Agent Development Team. It implements the **[autonomous agent](https://www.willvelida.com/posts/entra-agent-id-how-to-auth-to-azure/#two-operation-patterns)** operation pattern -- the agent authenticates under its own identity via the Entra SDK sidecar, and the resulting token's `sub`/`oid` claims identify the agent, not the hosting application.
+Demonstrates Entra Agent ID on AKS using the **[autonomous agent](https://www.willvelida.com/posts/entra-agent-id-how-to-auth-to-azure/#two-operation-patterns)** pattern with the Entra SDK sidecar. Zero auth code in the app.
+
+For detailed technical walkthrough, see [docs/flow-aks-agent-identity.md](../docs/flow-aks-agent-identity.md).
 
 ## Architecture
 
@@ -116,49 +118,28 @@ bash persona-2-developer/05-deploy-app.sh
 bash persona-2-developer/06-verify.sh
 ```
 
-## What the Demo App Does
+## Endpoints
 
-The Python Flask app uses the **Microsoft Entra SDK for AgentID** sidecar container for all token management. Zero auth code in the app itself.
-
-### Endpoints
-
-- **`GET /`** -- App info and available endpoints
-- **`GET /write-status`** -- Returns cached blob write result. A background thread writes a heartbeat blob every 60s using an agent identity-scoped token. Returns `success-write` or `fail-write`
-- **`GET /sidecar-health`** -- Checks if the Entra SDK sidecar container is responsive
+- **`GET /`** -- App info
+- **`GET /write-status`** -- Blob write result (background thread writes every 60s using agent identity token)
+- **`GET /sidecar-health`** -- Entra SDK sidecar status
 - **`GET /health`** -- Liveness probe
 
-### Architecture
+### Pod Architecture
 
 ```mermaid
 flowchart LR
     subgraph pod["Pod (AKS)"]
         app["agent-demo\nPython Flask · port 8080\n(zero auth code)"]
-        sidecar["entra-sdk-sidecar\nport 5000\nmcr.microsoft.com/entra-sdk/\nauth-sidecar:1.0.0-azurelinux3.0-distroless"]
+        sidecar["entra-sdk-sidecar\nport 5000"]
     end
 
     app -- "GET /AuthorizationHeaderUnauthenticated/..." --> sidecar
 ```
 
-A successful `/write-status` response shows:
-- `last_result: "success-write"` -- blob heartbeats written every 60s
-- `total_success` / `total_fail` -- running counters
+## Governance Demo
 
-## Disabling Agent Access (Governance Demo)
-
-The key governance demo is showing that the central team can instantly disable agent access by removing the FIC from the blueprint. See **[docs/demo-disable-verify.md](../docs/demo-disable-verify.md)** for step-by-step instructions covering:
-
-1. Verify current working state
-2. Delete the FIC on the blueprint
-3. Verify `/write-status` switches to `fail-write`
-4. Re-create the FIC and verify recovery
-
-## Repeating for New Blueprints or Agent IDs
-
-The scripts are designed to be repeatable:
-
-- **New blueprint:** Change `BLUEPRINT_NAME` in `.env` and re-run `02-create-blueprint.sh`
-- **New agent identity:** Change `AGENT_DISPLAY_NAME` in `.env` and re-run `03-create-agent-id.sh`
-- **New AKS cluster:** Change `CLUSTER_NAME` and `RESOURCE_GROUP` and re-run `01-provision-aks.sh`
+Disable agent access by removing the FIC from the blueprint. See **[docs/demo-disable-verify.md](../docs/demo-disable-verify.md)** for step-by-step instructions.
 
 ## Cleanup
 
