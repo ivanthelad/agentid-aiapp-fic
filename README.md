@@ -33,7 +33,6 @@ flowchart LR
 
 The key benefit: RBAC roles are assigned to the **agent identity** (not the blueprint, not the managed identity). Each agent gets its own discrete, auditable identity with scoped permissions.
 
-> **Further reading:** [Will Velida -- Entra Agent ID: How to Auth to Azure](https://www.willvelida.com/posts/entra-agent-id-how-to-auth-to-azure/) provides an excellent walkthrough of both operation patterns with a Cosmos DB + Container Apps sample.
 
 ---
 
