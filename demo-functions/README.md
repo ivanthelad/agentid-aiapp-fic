@@ -1,14 +1,15 @@
 # Agent ID Demo — Azure Functions with Two-Step Token Exchange
 
-This demo deploys an autonomous AI agent on Azure Functions using a managed identity and the two-step token exchange pattern, reusing the same blueprint from the AKS demo.
+This demo deploys an autonomous AI agent on Azure Functions using a managed identity and the two-step token exchange pattern. It is fully self-contained -- no other demos need to be run first.
 
 ## Architecture
 
 ```mermaid
 flowchart LR
     subgraph persona1["Persona 1: Central AI Governance"]
+        P1_00["00-setup-prerequisites.sh\nMgmt App + Sponsor Group"]
         P1_01["01-provision-function.sh\nFunction App + MI"]
-        P1_02["02-add-fic-for-msi.sh\nFIC on existing blueprint"]
+        P1_02["02-create-blueprint.sh\nBlueprint + MSI FIC"]
         P1_03["03-create-agent-id.sh\nAgent Identity"]
     end
 
@@ -18,7 +19,7 @@ flowchart LR
         P2_06["06-verify.sh\nTest endpoints"]
     end
 
-    P1_01 --> P1_02 --> P1_03 --> P2_04 --> P2_05 --> P2_06
+    P1_00 --> P1_01 --> P1_02 --> P1_03 --> P2_04 --> P2_05 --> P2_06
 ```
 
 ## Prerequisites
@@ -29,20 +30,12 @@ flowchart LR
   ```
 - [Azure Functions Core Tools](https://learn.microsoft.com/azure/azure-functions/functions-run-local) v4+ (`func`)
 - `jq` and `python3` installed
-- **AKS demo prerequisites already completed** -- specifically:
-  - `00-setup-prerequisites.sh` (management app + sponsor group)
-  - `02-create-blueprint.sh` (blueprint already exists)
+- Current user must be Global Admin or Privileged Role Admin (for 00-setup-prerequisites.sh)
 
-## Before You Begin
-
-Copy required values from the AKS demo's `.env` into this demo's `.env`:
+## Getting Started
 
 ```bash
 cp .env.template .env
-
-# Copy these from ../demo/.env:
-#   MGMT_APP_ID, MGMT_APP_SECRET, SPONSOR_GROUP_ID
-#   TENANT_ID, BLUEPRINT_OBJECT_ID, BLUEPRINT_APP_ID
 ```
 
 Optionally set custom names:
@@ -55,8 +48,9 @@ export FUNC_APP_NAME=func-myproject-agentid
 
 | Script | Writes to `.env` |
 |---|---|
+| `00-setup-prerequisites.sh` | MGMT_APP_ID, MGMT_APP_SECRET, SPONSOR_GROUP_ID |
 | `01-provision-function.sh` | Function App config, MI_CLIENT_ID, MI_PRINCIPAL_ID |
-| `02-add-fic-for-msi.sh` | (read-only -- FIC created on existing blueprint) |
+| `02-create-blueprint.sh` | TENANT_ID, BLUEPRINT_OBJECT_ID, BLUEPRINT_APP_ID, BLUEPRINT_SP_ID |
 | `03-create-agent-id.sh` | AGENT_IDENTITY_ID, AGENT_IDENTITY_APP_ID |
 | `04-setup-storage.sh` | Storage account name |
 | `05-deploy-function.sh` | (read-only) |
@@ -69,11 +63,14 @@ export FUNC_APP_NAME=func-myproject-agentid
 ```bash
 cd demo-functions
 
+# 0. Create management app + sponsor group (one-time per tenant)
+bash persona-1-governance/00-setup-prerequisites.sh
+
 # 1. Create Function App + User-Assigned Managed Identity
 bash persona-1-governance/01-provision-function.sh
 
-# 2. Add FIC for managed identity to existing blueprint
-bash persona-1-governance/02-add-fic-for-msi.sh
+# 2. Create blueprint + add FIC for managed identity
+bash persona-1-governance/02-create-blueprint.sh
 
 # 3. Create agent identity from blueprint
 bash persona-1-governance/03-create-agent-id.sh
@@ -119,6 +116,6 @@ source demo-functions/.env
 # Delete Function App resources
 az group delete --name $FUNC_RESOURCE_GROUP --yes --no-wait
 
-# Remove the MSI FIC from the blueprint (keeps AKS FIC intact)
-# Use the Graph API to list and delete the specific FIC named "msi-workload-identity"
+# Remove the blueprint (deletes all FICs with it)
+# Use the Graph API to delete the application by BLUEPRINT_OBJECT_ID
 ```

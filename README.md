@@ -48,11 +48,11 @@ Working demo with persona-separated scripts (00-06). Python Flask app with sidec
 
 ### [Functions Demo — Python](./demo-functions/README.md)
 
-Azure Functions demo using two-step token exchange (MSI → T1 → TR). Raw HTTP approach (Python SDKs lack `fmi_path` support). Throttled blob writes via agent identity.
+Azure Functions demo using two-step token exchange (MSI → T1 → TR). Self-contained with its own blueprint and prerequisites. Raw HTTP approach (Python SDKs lack `fmi_path` support). Throttled blob writes via agent identity.
 
 ### [Functions Demo — .NET](./demo-functions-dotnet/README.md)
 
-Azure Functions demo (C# .NET 8) using SDK-native `FmiTransport` pattern. Same pipeline as Python demo but uses `Azure.Identity` with custom transport — no raw HTTP needed.
+Azure Functions demo (C# .NET 8) using SDK-native `FmiTransport` pattern. Self-contained with its own blueprint and prerequisites. Same pipeline as Python demo but uses `Azure.Identity` with custom transport — no raw HTTP needed.
 
 ### [Functions Agent Identity Guide](./docs/functions-agent-identity.md)
 

@@ -6,9 +6,7 @@
 # Prerequisites:
 #   - Logged in to test tenant: source ../az-agentid-setup.sh
 #   - MGMT_APP_ID, MGMT_APP_SECRET, SPONSOR_GROUP_ID in .env
-#     (run ../demo/persona-1-governance/00-setup-prerequisites.sh first)
-#   - TENANT_ID, BLUEPRINT_OBJECT_ID, BLUEPRINT_APP_ID in .env
-#     (copy from ../demo/.env if reusing AKS blueprint)
+#     (run 00-setup-prerequisites.sh first)
 #
 # Creates:
 #   - Resource group
