@@ -70,7 +70,15 @@ az storage account create \
   --location "$FUNC_LOCATION" \
   --sku Standard_LRS \
   --kind StorageV2 \
+  --allow-shared-key-access true \
   --output none
+
+# Ensure shared key access is enabled (Azure Policy may override at creation)
+az storage account update \
+  --name "$FUNC_STORAGE_NAME" \
+  --resource-group "$FUNC_RESOURCE_GROUP" \
+  --allow-shared-key-access true \
+  --output none 2>/dev/null || true
 
 echo "✅ Hosting storage account created: $FUNC_STORAGE_NAME"
 
