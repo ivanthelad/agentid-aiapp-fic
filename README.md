@@ -62,6 +62,10 @@ Technical reference for Agent ID on Functions/App Service: two-step token exchan
 
 Enterprise governance reference: RACI matrix, required Entra roles, lifecycle flow, code snippets for both personas, access packages, conditional access, and adoption roadmap.
 
+### [Concepts Reference](./docs/concepts.md)
+
+Quick reference for core objects (blueprints, agent identities, FICs, sponsors, management app), required Entra roles with explanations of why each is needed, blocked permissions, and token exchange flows.
+
 ---
 
 ## Key Concepts
