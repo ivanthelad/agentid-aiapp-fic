@@ -2,6 +2,46 @@
 
 A quick reference for the core objects, roles, and trust model behind Microsoft Entra Agent ID.
 
+## Object Hierarchy
+
+```mermaid
+graph TD
+    subgraph entra["Microsoft Entra ID"]
+        MA["Management App\n(client_credentials)"]
+        SG["Sponsor Group\n(mandatory)"]
+
+        BP["Agent Identity Blueprint\n(app registration)"]
+        FIC["Federated Identity\nCredential (FIC)"]
+        BP_SP["Blueprint\nService Principal"]
+
+        AI1["Agent Identity 1\n(ServiceIdentity SP)"]
+        AI2["Agent Identity 2\n(ServiceIdentity SP)"]
+    end
+
+    subgraph compute["Compute Infrastructure"]
+        MSI["Managed Identity\n(Functions / App Service)"]
+        KSA["K8s Service Account\n(AKS)"]
+    end
+
+    subgraph resources["Azure Resources"]
+        BLOB["Blob Storage"]
+        COSMOS["Cosmos DB / etc."]
+    end
+
+    MA -->|"creates"| BP
+    MA -->|"creates"| BP_SP
+    SG -.->|"sponsors"| BP
+    SG -.->|"sponsors"| AI1
+    SG -.->|"sponsors"| AI2
+    BP -->|"holds"| FIC
+    BP -->|"1:N"| AI1
+    BP -->|"1:N"| AI2
+    FIC ---|"trusts"| MSI
+    FIC ---|"trusts"| KSA
+    AI1 -->|"RBAC"| BLOB
+    AI2 -->|"RBAC"| COSMOS
+```
+
 ## Objects
 
 ### Agent Identity Blueprint
@@ -91,6 +131,29 @@ The dev team requires **no Entra directory roles**. They:
 - Deploy application code with workload identity federation
 - Request permissions via access packages (enterprise scenarios)
 
+## Governance Guardrails
+
+```mermaid
+graph LR
+    subgraph enforced["Platform-Enforced"]
+        B1["Blocked high-privilege\nroles"]
+        B2["Mandatory sponsor"]
+        B3["No credentials on\nagent identities"]
+    end
+
+    subgraph configurable["Configurable by Governance Team"]
+        C1["Conditional access\npolicies on blueprints"]
+        C2["Time-bound permissions\nvia access packages"]
+        C3["FIC as kill switch\n(remove to disable)"]
+    end
+
+    subgraph audit["Audit & Accountability"]
+        A1["Token oid = agent identity\n(per-agent audit trail)"]
+        A2["Sponsor receives\nexpiration notifications"]
+        A3["Sponsorship auto-transfers\non departure"]
+    end
+```
+
 ## Blocked Roles and Permissions
 
 Agent identities **cannot** be assigned these (platform-enforced):
@@ -110,17 +173,40 @@ Custom directory roles are also not supported for agent identities.
 
 ### Kubernetes (single step)
 
-```
-K8s SA JWT  →  Entra  →  Resource token (e.g. Storage)
+```mermaid
+sequenceDiagram
+    participant Pod as K8s Pod
+    participant Entra as Microsoft Entra ID
+    participant Res as Azure Resource
+
+    Pod->>Entra: K8s SA JWT (client_assertion)
+    Note right of Entra: FIC validates OIDC issuer + subject
+    Entra-->>Pod: Resource token (oid = agent identity)
+    Pod->>Res: API call with bearer token
 ```
 
 The projected service account JWT is exchanged directly for a resource token. The FIC on the blueprint trusts the cluster's OIDC issuer.
 
 ### Azure Functions (two steps)
 
-```
-Step 1:  MSI token  →  Entra (with fmi_path)  →  Blueprint exchange token (T1)
-Step 2:  T1          →  Entra                   →  Resource token (e.g. Storage)
+```mermaid
+sequenceDiagram
+    participant Func as Function App
+    participant MSI as Managed Identity
+    participant Entra as Microsoft Entra ID
+    participant Res as Azure Resource
+
+    Func->>MSI: Get MSI token
+    MSI-->>Func: MSI token
+
+    Func->>Entra: Step 1: MSI token + fmi_path=<agent-id><br/>scope=api://AzureADTokenExchange/.default
+    Note right of Entra: FIC validates MSI principal<br/>fmi_path selects agent identity
+    Entra-->>Func: Exchange token (T1)
+
+    Func->>Entra: Step 2: T1 as client_assertion<br/>scope=https://storage.azure.com/.default
+    Entra-->>Func: Resource token (oid = agent identity)
+
+    Func->>Res: API call with bearer token
 ```
 
 The extra step is needed because Functions uses Entra-to-Entra federation (MSI issuer is Entra itself, not an external OIDC provider). The `fmi_path` parameter tells Entra which child agent identity to impersonate.
