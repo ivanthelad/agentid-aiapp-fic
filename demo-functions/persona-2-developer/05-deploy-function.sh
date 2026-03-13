@@ -42,8 +42,6 @@ az functionapp config appsettings set \
     "AGENT_IDENTITY_ID=${AGENT_IDENTITY_ID}" \
     "STORAGE_ACCOUNT_NAME=${STORAGE_ACCOUNT_NAME}" \
     "STORAGE_CONTAINER=${STORAGE_CONTAINER}" \
-    "AGENT_DISPLAY_NAME=${AGENT_DISPLAY_NAME:-agentid-func-agent}" \
-    "ENABLE_A365_OBSERVABILITY_EXPORTER=false" \
   --output none
 
 echo "✅ App settings configured"

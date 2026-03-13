@@ -54,6 +54,7 @@ Pod (AKS)
 
 - Use `--` for em-dashes in markdown content (not `—`)
 - Technical writing: direct, precise, no marketing language
+- Never reference specific users, authors, or personal identities in code comments, commit messages, or documentation
 - Code examples use C#, Python, PowerShell, and raw HTTP requests
 - ASCII diagrams for architecture (no image dependencies)
 - When modifying the PowerPoint, use `python-pptx` via a temporary Python script (delete after execution)

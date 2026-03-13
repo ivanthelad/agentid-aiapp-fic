@@ -45,6 +45,9 @@ pip-delete-this-directory.txt
 .azure/
 .azure-*/
 
+# ===== Agent 365 CLI output =====
+a365-publish/
+
 # ===== IDEs =====
 .vscode/
 !.vscode/settings.json

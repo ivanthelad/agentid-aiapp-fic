@@ -315,6 +315,24 @@ def get_agent_token(service_name, agent_identity_id):
 - [Christian Posta — Entra Agent ID on K8s](https://blog.christianposta.com/entra-agent-id-agw/)
 - [Agent OAuth Protocols](https://learn.microsoft.com/entra/agent-id/identity-platform/agent-oauth-protocols)
 
+## Agent 365 Publishing (Existing Blueprint)
+
+When the blueprint, agent identity, and deployment already exist, you can publish to Agent 365 without running `a365 setup`. The workflow:
+
+1. **Install CLI**: `dotnet tool install --global Microsoft.Agents.A365.DevTools.Cli --prerelease`
+2. **Create custom client app** — Separate from management app. Needs delegated permissions: `Application.ReadWrite.All`, `DelegatedPermissionGrant.ReadWrite.All`, `Directory.Read.All`, `AgentIdentityBlueprint.ReadWrite.All`, `AgentIdentityBlueprint.UpdateAuthProperties.All`. Grant admin consent via Graph API (NOT Entra admin center button -- it overwrites beta permissions).
+3. **Generate `a365.config.json`** — Set `needDeployment: false`, provide `clientAppId`, `tenantId`, `subscriptionId`, `resourceGroup`, `webAppName`, `messagingEndpoint`.
+4. **Generate `a365.generated.config.json`** — Populate `agentBlueprintId`, `agentBlueprintObjectId`, `agentBlueprintServicePrincipalObjectId`, `managedIdentityPrincipalId`, `completed: true`.
+5. **Run `a365 publish`** — Interactive: prompts for manifest editing, opens browser for auth.
+
+### A365 Publish Gotchas
+
+1. **`name.short` max 30 chars** — The manifest `name.short` field must be ≤30 characters. Don't append " Blueprint" to agent display names.
+2. **`Directory.AccessAsUser.All` rejection** — The A365 CLI's delegated token includes `Directory.AccessAsUser.All`, which Agent ID APIs reject. Post-publish Graph operations (FIC creation, app role grants) fail with 400. These are non-fatal if your FIC and permissions are already configured.
+3. **Admin consent via API, not UI** — Use `POST /v1.0/oauth2PermissionGrants` to grant consent. The Entra admin center "Grant admin consent" button uses v1.0 only and deletes beta permission grants (e.g., `AgentIdentityBlueprint.*`).
+4. **Manifest version must increment** — When republishing, bump `version` in `manifest.json` (e.g., 1.0.0 → 1.0.1).
+5. **MOS permissions auto-added** — The CLI automatically creates service principals for MOS resource apps and adds 3 MOS permissions to your client app.
+
 ## Updating This Skill
 
 When you discover new information about Agent ID (API changes, new fields, behavioral quirks, error resolutions), add it to the appropriate section above. This skill should be the single source of truth for Agent ID development patterns.

@@ -19,7 +19,12 @@ flowchart LR
         P2_06["06-verify.sh\nTest endpoints"]
     end
 
+    subgraph optional["Optional: Agent 365 Publishing"]
+        P1_07["07-publish-a365.sh\nPublish to M365 Admin"]
+    end
+
     P1_00 --> P1_01 --> P1_02 --> P1_03 --> P2_04 --> P2_05 --> P2_06
+    P2_06 -.-> P1_07
 ```
 
 ## Prerequisites
@@ -55,6 +60,7 @@ export FUNC_APP_NAME=func-myproject-agentid
 | `04-setup-storage.sh` | Storage account name |
 | `05-deploy-function.sh` | (read-only) |
 | `06-verify.sh` | (read-only) |
+| `07-publish-a365.sh` | (read-only -- optional, requires A365 CLI) |
 
 ## Execution Order
 
@@ -101,38 +107,27 @@ Python SDKs don't support `fmi_path` yet, so this demo uses raw HTTP. See [docs/
 
 ## What the Function App Does
 
-A Python Azure Function with zero secrets -- all authentication handled via managed identity + two-step token exchange. Includes [Agent 365 Observability](https://learn.microsoft.com/en-us/microsoft-agent-365/developer/observability?tabs=python) for governance-level agent monitoring.
+A Python Azure Function with zero secrets -- all authentication handled via managed identity + two-step token exchange.
 
 ### Endpoints
 
 - **`GET /api/write-status`** -- Performs a live blob write via the two-step token exchange and returns the result (`success-write` / `fail-write`)
 - **`GET /api/health`** -- Liveness probe
 
-## Agent 365 Observability
+## Optional: Publish to Agent 365
 
-This demo integrates the Microsoft Agent 365 Observability SDK to emit standardised OpenTelemetry spans for every agent invocation. This enables governance teams to monitor agent activity via Microsoft 365 admin center, Defender, and Purview.
+After the demo is running, the governance team can optionally publish the agent to the Microsoft 365 admin center. This registers the agent for governance-level monitoring via Defender and Purview.
 
-### What is instrumented
+**Prerequisites:** [A365 CLI](https://learn.microsoft.com/en-us/microsoft-agent-365/developer/reference/cli/overview) installed, plus `A365_CLIENT_APP_ID`, `SUBSCRIPTION_ID`, and `MANAGER_EMAIL` set in `.env`.
 
-| Scope | Span name | What it captures |
-|---|---|---|
-| `InvokeAgentScope` | `invoke_agent` | Each `/api/write-status` request -- agent identity, tenant, correlation ID |
-| `ExecuteToolScope` | `execute_tool blob_write` | The blob write operation -- storage account, container, blob name |
+```bash
+cd demo-functions
 
-### Configuration
+# 7. Publish agent to M365 admin center (interactive -- opens browser)
+bash persona-1-governance/07-publish-a365.sh
+```
 
-| Env var | Default | Purpose |
-|---|---|---|
-| `ENABLE_A365_OBSERVABILITY_EXPORTER` | `false` | `true` = export to Agent 365 service (Frontier preview required). `false` = console exporter for local validation |
-| `AGENT_DISPLAY_NAME` | `agentid-func-agent` | Service name in telemetry spans |
-
-### Validating locally
-
-Set `ENABLE_A365_OBSERVABILITY_EXPORTER=false` (the default). Spans are printed to the Function App console logs. Look for `invoke_agent` and `execute_tool` spans in the output -- see the [Microsoft docs](https://learn.microsoft.com/en-us/microsoft-agent-365/developer/observability?tabs=python#validate-locally) for sample log format.
-
-### Token resolver
-
-The token resolver currently returns `None` (console mode). When Frontier preview access is available, implement it to return a bearer token for the A365 service scope. See `_token_resolver()` in `function_app.py`.
+See the [A365 developer lifecycle docs](https://learn.microsoft.com/en-us/microsoft-agent-365/developer/a365-dev-lifecycle) for details.
 
 ## Cleanup
 
